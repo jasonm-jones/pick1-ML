@@ -1,0 +1,5 @@
+# Ignore all contents of data-cleaned
+/data-cleaned/**
+
+# Keep a placeholder so the folder stays in git
+!/data-cleaned/.gitkeep
