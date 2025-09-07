@@ -3,7 +3,8 @@ import glob
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import brier_score_loss, roc_auc_score, accuracy_score
 import joblib
 
@@ -23,29 +24,26 @@ def prepare_features(df):
     # Drop rows with missing target
     df = df.dropna(subset=["win"])
 
+    # Use only strongest predictors to avoid overfitting
     features = [
-        "win_probability",
-        "pick_percentage",
+        "win_probability",    # anchor feature
         "spread",
-        "ev",
-        "future_val",
-        "opp_win_probability",
-        "opp_pick_percentage",
-        "opp_spread",
-        "opp_ev",
-        "opp_future_val"
+        "pick_percentage"
     ]
+
+    # Fill any missing spreads
+    for col in ["spread"]:
+        if col in df.columns:
+            df[col] = df[col].fillna(0)
 
     X = df[features].copy()
     y = df["win"].astype(int)
-
     return X, y
 
 def evaluate_baseline(X, y):
     """
     Evaluate raw Vegas win_probability as a predictor.
     """
-    # Normalize to [0,1]
     probs = X["win_probability"].astype(float) / 100.0
     preds = (probs >= 0.5).astype(int)
 
@@ -63,23 +61,19 @@ def train_model(X, y):
         X, y, test_size=0.2, shuffle=True, random_state=42
     )
 
-    model = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=8,
-        random_state=42
-    )
+    # Logistic regression with calibration
+    base_lr = LogisticRegression(max_iter=1000)
+    model = CalibratedClassifierCV(base_lr, cv=5)
     model.fit(X_train, y_train)
 
-    # Predict probabilities
     y_pred_proba = model.predict_proba(X_test)[:, 1]
-    y_pred = model.predict(X_test)
+    y_pred = (y_pred_proba >= 0.5).astype(int)
 
-    # Metrics
     auc = roc_auc_score(y_test, y_pred_proba)
     brier = brier_score_loss(y_test, y_pred_proba)
     acc = accuracy_score(y_test, y_pred)
 
-    print("\n🤖 ML Model (RandomForest):")
+    print("\n🤖 ML Model (Calibrated Logistic Regression):")
     print(f"AUC:   {auc:.4f}")
     print(f"Brier: {brier:.4f}")
     print(f"Acc:   {acc:.4f}")
@@ -90,10 +84,8 @@ if __name__ == "__main__":
     df = load_data()
     X, y = prepare_features(df)
 
-    # 1) Evaluate baseline Vegas odds
     evaluate_baseline(X, y)
 
-    # 2) Train ML model
     model = train_model(X, y)
 
     # Save model
